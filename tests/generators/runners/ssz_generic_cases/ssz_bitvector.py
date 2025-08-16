@@ -30,14 +30,17 @@ def bitvector_case_fn(
 
 def valid_cases():
     rng = Random(1234)
-    for size in [1, 2, 3, 4, 5, 8, 16, 31, 512, 513]:
+    for size in [1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 31, 32, 33, 511, 512, 513]:
         for mode in [
             RandomizationMode.mode_random,
             RandomizationMode.mode_zero,
             RandomizationMode.mode_max,
         ]:
-            yield f"bitvec_{size}_{mode.to_name()}", valid_test_case(
-                lambda: bitvector_case_fn(rng, mode, size)
+            yield (
+                f"bitvec_{size}_{mode.to_name()}",
+                valid_test_case(
+                    lambda rng=rng, mode=mode, size=size: bitvector_case_fn(rng, mode, size)
+                ),
             )
 
 
@@ -65,8 +68,11 @@ def invalid_cases():
             RandomizationMode.mode_zero,
             RandomizationMode.mode_max,
         ]:
-            yield f"bitvec_{typ_size}_{mode.to_name()}_{test_size}", invalid_test_case(
-                lambda: serialize(
-                    bitvector_case_fn(rng, mode, test_size, invalid_making_pos=typ_size)
-                )
+            yield (
+                f"bitvec_{typ_size}_{mode.to_name()}_{test_size}",
+                invalid_test_case(
+                    lambda rng=rng, mode=mode, test_size=test_size, typ_size=typ_size: serialize(
+                        bitvector_case_fn(rng, mode, test_size, invalid_making_pos=typ_size)
+                    )
+                ),
             )

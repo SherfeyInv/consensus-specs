@@ -19,6 +19,7 @@ from eth2spec.test.helpers.forks import (
     is_post_eip7441,
     is_post_eip7732,
     is_post_electra,
+    is_post_fulu,
 )
 from eth2spec.test.helpers.keys import pubkeys
 
@@ -160,6 +161,7 @@ def create_genesis_state(spec, validator_balances, activation_threshold):
     # We "hack" in the initial validators,
     #  as it is much faster than creating and processing genesis deposits for every single test case.
     state.balances = validator_balances
+
     state.validators = [
         build_mock_validator(spec, i, state.balances[i]) for i in range(len(validator_balances))
     ]
@@ -217,10 +219,19 @@ def create_genesis_state(spec, validator_balances, activation_threshold):
         state.pending_consolidations = []
 
     if is_post_eip7732(spec):
+        state.execution_payload_availability = [0b1 for _ in range(spec.SLOTS_PER_HISTORICAL_ROOT)]
         withdrawals = spec.List[spec.Withdrawal, spec.MAX_WITHDRAWALS_PER_PAYLOAD]()
         state.latest_withdrawals_root = withdrawals.hash_tree_root()
         state.latest_block_hash = (
             state.latest_execution_payload_header.block_hash
         )  # last block is full
+        state.builder_pending_payments = [
+            spec.BuilderPendingPayment() for _ in range(2 * spec.SLOTS_PER_EPOCH)
+        ]
+        state.builder_pending_withdrawals = []
+
+    if is_post_fulu(spec):
+        # Initialize proposer lookahead list
+        state.proposer_lookahead = spec.initialize_proposer_lookahead(state)
 
     return state

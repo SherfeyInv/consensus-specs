@@ -34,21 +34,37 @@ def run_execution_payload_processing(
     if is_post_eip7732(spec):
         envelope = spec.ExecutionPayloadEnvelope(
             payload=execution_payload,
-            payload_withheld=False,
             blob_kzg_commitments=blob_kzg_commitments,
+            slot=state.slot,
+            builder_index=spec.get_beacon_proposer_index(state),
         )
         kzg_list = spec.List[spec.KZGCommitment, spec.MAX_BLOB_COMMITMENTS_PER_BLOCK](
             blob_kzg_commitments
         )
         state.latest_execution_payload_header.blob_kzg_commitments_root = kzg_list.hash_tree_root()
+        state.latest_execution_payload_header.builder_index = envelope.builder_index
         post_state = state.copy()
         previous_state_root = state.hash_tree_root()
         if post_state.latest_block_header.state_root == spec.Root():
             post_state.latest_block_header.state_root = previous_state_root
         envelope.beacon_block_root = post_state.latest_block_header.hash_tree_root()
 
+        payment = post_state.builder_pending_payments[
+            spec.SLOTS_PER_EPOCH + state.slot % spec.SLOTS_PER_EPOCH
+        ]
+        exit_queue_epoch = spec.compute_exit_epoch_and_update_churn(
+            post_state, payment.withdrawal.amount
+        )
+        payment.withdrawal.withdrawable_epoch = spec.Epoch(
+            exit_queue_epoch + spec.config.MIN_VALIDATOR_WITHDRAWABILITY_DELAY
+        )
+        post_state.builder_pending_withdrawals.append(payment.withdrawal)
+        post_state.builder_pending_payments[
+            spec.SLOTS_PER_EPOCH + state.slot % spec.SLOTS_PER_EPOCH
+        ] = spec.BuilderPendingPayment()
+
+        post_state.execution_payload_availability[state.slot % spec.SLOTS_PER_HISTORICAL_ROOT] = 0b1
         post_state.latest_block_hash = execution_payload.block_hash
-        post_state.latest_full_slot = state.slot
         envelope.state_root = post_state.hash_tree_root()
         privkey = privkeys[envelope.builder_index]
         signature = spec.get_execution_payload_envelope_signature(
@@ -103,8 +119,10 @@ def run_execution_payload_processing(
     yield "post", state
 
     if is_post_eip7732(spec):
+        assert (
+            state.execution_payload_availability[state.slot % spec.SLOTS_PER_HISTORICAL_ROOT] == 0b1
+        )
         assert state.latest_block_hash == execution_payload.block_hash
-        assert state.latest_full_slot == state.slot
     else:
         assert state.latest_execution_payload_header == get_execution_payload_header(
             spec, state, execution_payload
@@ -122,7 +140,7 @@ attempting to do a validation of its own.
 @spec_state_test
 def test_incorrect_blob_tx_type(spec, state):
     """
-    The versioned hashes are wrong, but the testing ExecutionEngine returns VALID by default.
+    The transaction type is wrong, but the testing ExecutionEngine returns VALID by default.
     """
     execution_payload = build_empty_execution_payload(spec, state)
 
@@ -132,7 +150,7 @@ def test_incorrect_blob_tx_type(spec, state):
     execution_payload.transactions = [opaque_tx]
     execution_payload.block_hash = compute_el_block_hash(spec, execution_payload, state)
 
-    # Make the first block full in EIP-7732
+    # Make the first block full in EIP7732
     if is_post_eip7732(spec):
         state.latest_execution_payload_header.block_hash = execution_payload.block_hash
 
@@ -145,7 +163,7 @@ def test_incorrect_blob_tx_type(spec, state):
 @spec_state_test
 def test_incorrect_transaction_length_1_extra_byte(spec, state):
     """
-    The versioned hashes are wrong, but the testing ExecutionEngine returns VALID by default.
+    The transaction length is wrong, but the testing ExecutionEngine returns VALID by default.
     """
     execution_payload = build_empty_execution_payload(spec, state)
 
@@ -155,7 +173,7 @@ def test_incorrect_transaction_length_1_extra_byte(spec, state):
     execution_payload.transactions = [opaque_tx]
     execution_payload.block_hash = compute_el_block_hash(spec, execution_payload, state)
 
-    # Make the first block full in EIP-7732
+    # Make the first block full in EIP7732
     if is_post_eip7732(spec):
         state.latest_execution_payload_header.block_hash = execution_payload.block_hash
     yield from run_execution_payload_processing(
@@ -167,7 +185,7 @@ def test_incorrect_transaction_length_1_extra_byte(spec, state):
 @spec_state_test
 def test_incorrect_transaction_length_1_byte_short(spec, state):
     """
-    The versioned hashes are wrong, but the testing ExecutionEngine returns VALID by default.
+    The transaction length is wrong, but the testing ExecutionEngine returns VALID by default.
     """
     execution_payload = build_empty_execution_payload(spec, state)
 
@@ -177,7 +195,7 @@ def test_incorrect_transaction_length_1_byte_short(spec, state):
     execution_payload.transactions = [opaque_tx]
     execution_payload.block_hash = compute_el_block_hash(spec, execution_payload, state)
 
-    # Make the first block full in EIP-7732
+    # Make the first block full in EIP7732
     if is_post_eip7732(spec):
         state.latest_execution_payload_header.block_hash = execution_payload.block_hash
     yield from run_execution_payload_processing(
@@ -189,7 +207,7 @@ def test_incorrect_transaction_length_1_byte_short(spec, state):
 @spec_state_test
 def test_incorrect_transaction_length_empty(spec, state):
     """
-    The versioned hashes are wrong, but the testing ExecutionEngine returns VALID by default.
+    The transaction length is wrong, but the testing ExecutionEngine returns VALID by default.
     """
     execution_payload = build_empty_execution_payload(spec, state)
 
@@ -199,7 +217,7 @@ def test_incorrect_transaction_length_empty(spec, state):
     execution_payload.transactions = [opaque_tx]
     execution_payload.block_hash = compute_el_block_hash(spec, execution_payload, state)
 
-    # Make the first block full in EIP-7732
+    # Make the first block full in EIP7732
     if is_post_eip7732(spec):
         state.latest_execution_payload_header.block_hash = execution_payload.block_hash
     yield from run_execution_payload_processing(
@@ -211,7 +229,7 @@ def test_incorrect_transaction_length_empty(spec, state):
 @spec_state_test
 def test_incorrect_transaction_length_32_extra_bytes(spec, state):
     """
-    The versioned hashes are wrong, but the testing ExecutionEngine returns VALID by default.
+    The transaction length is wrong, but the testing ExecutionEngine returns VALID by default.
     """
     execution_payload = build_empty_execution_payload(spec, state)
 
@@ -221,7 +239,7 @@ def test_incorrect_transaction_length_32_extra_bytes(spec, state):
     execution_payload.transactions = [opaque_tx]
     execution_payload.block_hash = compute_el_block_hash(spec, execution_payload, state)
 
-    # Make the first block full in EIP-7732
+    # Make the first block full in EIP7732
     if is_post_eip7732(spec):
         state.latest_execution_payload_header.block_hash = execution_payload.block_hash
     yield from run_execution_payload_processing(
@@ -233,7 +251,7 @@ def test_incorrect_transaction_length_32_extra_bytes(spec, state):
 @spec_state_test
 def test_no_transactions_with_commitments(spec, state):
     """
-    The versioned hashes are wrong, but the testing ExecutionEngine returns VALID by default.
+    The commitments are provided without blob transactions, but the testing ExecutionEngine returns VALID by default.
     """
     execution_payload = build_empty_execution_payload(spec, state)
 
@@ -242,7 +260,7 @@ def test_no_transactions_with_commitments(spec, state):
     execution_payload.transactions = []
     execution_payload.block_hash = compute_el_block_hash(spec, execution_payload, state)
 
-    # Make the first block full in EIP-7732
+    # Make the first block full in EIP7732
     if is_post_eip7732(spec):
         state.latest_execution_payload_header.block_hash = execution_payload.block_hash
     yield from run_execution_payload_processing(
@@ -254,7 +272,7 @@ def test_no_transactions_with_commitments(spec, state):
 @spec_state_test
 def test_incorrect_commitment(spec, state):
     """
-    The versioned hashes are wrong, but the testing ExecutionEngine returns VALID by default.
+    The commitments are wrong, but the testing ExecutionEngine returns VALID by default.
     """
     execution_payload = build_empty_execution_payload(spec, state)
 
@@ -264,7 +282,7 @@ def test_incorrect_commitment(spec, state):
     execution_payload.transactions = [opaque_tx]
     execution_payload.block_hash = compute_el_block_hash(spec, execution_payload, state)
 
-    # Make the first block full in EIP-7732
+    # Make the first block full in EIP7732
     if is_post_eip7732(spec):
         state.latest_execution_payload_header.block_hash = execution_payload.block_hash
     yield from run_execution_payload_processing(
@@ -276,7 +294,7 @@ def test_incorrect_commitment(spec, state):
 @spec_state_test
 def test_no_commitments_for_transactions(spec, state):
     """
-    The versioned hashes are wrong, but the testing ExecutionEngine returns VALID by default.
+    The blob transactions are provided without commitments, but the testing ExecutionEngine returns VALID by default.
     """
     execution_payload = build_empty_execution_payload(spec, state)
 
@@ -298,7 +316,7 @@ def test_no_commitments_for_transactions(spec, state):
 @spec_state_test
 def test_incorrect_commitments_order(spec, state):
     """
-    The versioned hashes are wrong, but the testing ExecutionEngine returns VALID by default.
+    The commitments are provided in wrong order, but the testing ExecutionEngine returns VALID by default.
     """
     execution_payload = build_empty_execution_payload(spec, state)
 
@@ -308,7 +326,7 @@ def test_incorrect_commitments_order(spec, state):
     execution_payload.transactions = [opaque_tx]
     execution_payload.block_hash = compute_el_block_hash(spec, execution_payload, state)
 
-    # Make the first block full in EIP-7732
+    # Make the first block full in EIP7732
     if is_post_eip7732(spec):
         state.latest_execution_payload_header.block_hash = execution_payload.block_hash
     yield from run_execution_payload_processing(
@@ -320,7 +338,7 @@ def test_incorrect_commitments_order(spec, state):
 @spec_state_test
 def test_incorrect_transaction_no_blobs_but_with_commitments(spec, state):
     """
-    The versioned hashes are wrong, but the testing ExecutionEngine returns VALID by default.
+    The blob transaction is wrong, but the testing ExecutionEngine returns VALID by default.
     """
     execution_payload = build_empty_execution_payload(spec, state)
 
@@ -344,6 +362,9 @@ def test_incorrect_transaction_no_blobs_but_with_commitments(spec, state):
 @with_deneb_and_later
 @spec_state_test
 def test_incorrect_block_hash(spec, state):
+    """
+    The block hash is wrong, but the testing ExecutionEngine returns VALID by default.
+    """
     execution_payload = build_empty_execution_payload(spec, state)
 
     opaque_tx, _, blob_kzg_commitments, _ = get_sample_blob_tx(spec)
@@ -352,7 +373,7 @@ def test_incorrect_block_hash(spec, state):
     execution_payload.block_hash = b"\x12" * 32  # incorrect block hash
 
     # CL itself doesn't verify EL block hash
-    # Make the first block full in EIP-7732
+    # Make the first block full in EIP7732
     if is_post_eip7732(spec):
         state.latest_execution_payload_header.block_hash = execution_payload.block_hash
     yield from run_execution_payload_processing(
@@ -364,7 +385,7 @@ def test_incorrect_block_hash(spec, state):
 @spec_state_test
 def test_zeroed_commitment(spec, state):
     """
-    The blob is invalid, but the commitment is in correct form.
+    The commitment is in correct form but the blob is invalid, but the testing ExecutionEngine returns VALID by default.
     """
     execution_payload = build_empty_execution_payload(spec, state)
 
@@ -376,7 +397,7 @@ def test_zeroed_commitment(spec, state):
     execution_payload.transactions = [opaque_tx]
     execution_payload.block_hash = compute_el_block_hash(spec, execution_payload, state)
 
-    # Make the first block full in EIP-7732
+    # Make the first block full in EIP7732
     if is_post_eip7732(spec):
         state.latest_execution_payload_header.block_hash = execution_payload.block_hash
     yield from run_execution_payload_processing(
@@ -388,7 +409,7 @@ def test_zeroed_commitment(spec, state):
 @spec_state_test
 def test_invalid_correct_input__execution_invalid(spec, state):
     """
-    The versioned hashes are wrong, but the testing ExecutionEngine returns VALID by default.
+    The blob transaction and commitments are correct, but the testing ExecutionEngine returns INVALID.
     """
     execution_payload = build_empty_execution_payload(spec, state)
 
@@ -397,7 +418,7 @@ def test_invalid_correct_input__execution_invalid(spec, state):
     execution_payload.transactions = [opaque_tx]
     execution_payload.block_hash = compute_el_block_hash(spec, execution_payload, state)
 
-    # Make the first block full in EIP-7732
+    # Make the first block full in EIP7732
     if is_post_eip7732(spec):
         state.latest_execution_payload_header.block_hash = execution_payload.block_hash
     yield from run_execution_payload_processing(
@@ -408,6 +429,9 @@ def test_invalid_correct_input__execution_invalid(spec, state):
 @with_deneb_and_later
 @spec_state_test
 def test_invalid_exceed_max_blobs_per_block(spec, state):
+    """
+    The blob transaction and commitments are correct but the number of blobs exceeds the `MAX_BLOBS_PER_BLOCK`.
+    """
     execution_payload = build_empty_execution_payload(spec, state)
 
     opaque_tx, _, blob_kzg_commitments, _ = get_sample_blob_tx(
@@ -417,7 +441,7 @@ def test_invalid_exceed_max_blobs_per_block(spec, state):
     execution_payload.transactions = [opaque_tx]
     execution_payload.block_hash = compute_el_block_hash(spec, execution_payload, state)
 
-    # Make the first block full in EIP-7732
+    # Make the first block full in EIP7732
     if is_post_eip7732(spec):
         state.latest_execution_payload_header.block_hash = execution_payload.block_hash
     yield from run_execution_payload_processing(

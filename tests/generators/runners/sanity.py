@@ -1,4 +1,4 @@
-from typing import Iterable
+from collections.abc import Iterable
 
 from eth2spec.gen_helpers.gen_base.gen_typing import TestCase
 from eth2spec.gen_helpers.gen_from_tests.gen import get_test_cases_for
@@ -8,6 +8,10 @@ def handler_name_fn(mod):
     handler_name = mod.split(".")[-1]
     if handler_name == "test_deposit_transition":
         return "blocks"
+    if handler_name == "test_lookahead":
+        return "blocks"
+    if handler_name == "test_lookahead_slots":
+        return "slots"
     return handler_name.replace("test_", "")
 
 

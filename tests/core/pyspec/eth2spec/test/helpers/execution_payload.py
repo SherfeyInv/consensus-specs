@@ -274,12 +274,8 @@ def build_empty_post_eip7732_execution_payload_header(spec, state):
         return
     parent_block_root = hash_tree_root(state.latest_block_header)
     kzg_list = spec.List[spec.KZGCommitment, spec.MAX_BLOB_COMMITMENTS_PER_BLOCK]()
-    epoch = spec.get_current_epoch(state)
-    builder_index = None
-    for index in spec.get_active_validator_indices(state, epoch):
-        if not state.validators[index].slashed:
-            builder_index = index
-    assert builder_index is not None
+    # Use self-build: builder_index is the same as the beacon proposer index
+    builder_index = spec.get_beacon_proposer_index(state)
     return spec.ExecutionPayloadHeader(
         parent_block_hash=state.latest_block_hash,
         parent_block_root=parent_block_root,
@@ -309,7 +305,7 @@ def build_empty_execution_payload(spec, state, randao_mix=None):
     Assuming a pre-state of the same slot, build a valid ExecutionPayload without any transactions.
     """
     latest = state.latest_execution_payload_header
-    timestamp = spec.compute_timestamp_at_slot(state, state.slot)
+    timestamp = spec.compute_time_at_slot(state, state.slot)
     empty_txs = spec.List[spec.Transaction, spec.MAX_TRANSACTIONS_PER_PAYLOAD]()
 
     if randao_mix is None:

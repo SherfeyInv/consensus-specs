@@ -75,7 +75,7 @@ details.
 
 Blocks with execution enabled will be permitted to propagate regardless of the
 validity of the execution payload. This prevents network segregation between
-[optimistic](/sync/optimistic.md) and non-optimistic nodes.
+[optimistic](../../sync/optimistic.md) and non-optimistic nodes.
 
 In addition to the gossip validations for this topic from prior specifications,
 the following validations MUST pass before forwarding the `signed_beacon_block`
@@ -87,7 +87,7 @@ If the execution is enabled for the block -- i.e.
 
 - _[REJECT]_ The block's execution payload timestamp is correct with respect to
   the slot -- i.e.
-  `execution_payload.timestamp == compute_timestamp_at_slot(state, block.slot)`.
+  `execution_payload.timestamp == compute_time_at_slot(state, block.slot)`.
 - If `execution_payload` verification of block's parent by an execution node is
   *not* complete:
   - _[REJECT]_ The block's parent (defined by `block.parent_root`) passes all
@@ -113,10 +113,10 @@ details on how to handle transitioning gossip topics.
 
 ### The Req/Resp domain
 
-Non-faulty, [optimistic](/sync/optimistic.md) nodes may send blocks which result
-in an INVALID response from an execution engine. To prevent network segregation
-between optimistic and non-optimistic nodes, transmission of an INVALID
-execution payload via the Req/Resp domain SHOULD NOT cause a node to be
+Non-faulty, [optimistic](../../sync/optimistic.md) nodes may send blocks which
+result in an INVALID response from an execution engine. To prevent network
+segregation between optimistic and non-optimistic nodes, transmission of an
+INVALID execution payload via the Req/Resp domain SHOULD NOT cause a node to be
 down-scored or disconnected. Transmission of a block which is invalid due to any
 consensus layer rules (i.e., *not* execution layer rules) MAY result in
 down-scoring or disconnection.

@@ -8,15 +8,14 @@
   - [Misc](#misc)
 - [Custom types](#custom-types)
 - [Configuration](#configuration)
-  - [Data size](#data-size)
   - [Custody setting](#custody-setting)
-  - [Blob schedule](#blob-schedule)
+- [Preset](#preset)
+  - [Size parameters](#size-parameters)
   - [Containers](#containers)
     - [`DataColumnSidecar`](#datacolumnsidecar)
     - [`MatrixEntry`](#matrixentry)
 - [Helper functions](#helper-functions)
   - [`get_custody_groups`](#get_custody_groups)
-  - [`get_max_blobs_per_block`](#get_max_blobs_per_block)
   - [`compute_columns_for_custody_group`](#compute_columns_for_custody_group)
   - [`compute_matrix`](#compute_matrix)
   - [`recover_matrix`](#recover_matrix)
@@ -56,12 +55,6 @@ specification.
 
 ## Configuration
 
-### Data size
-
-| Name                | Value                                | Description                                   |
-| ------------------- | ------------------------------------ | --------------------------------------------- |
-| `NUMBER_OF_COLUMNS` | `uint64(CELLS_PER_EXT_BLOB)` (= 128) | Number of columns in the extended data matrix |
-
 ### Custody setting
 
 | Name                       | Value | Description                                                                       |
@@ -70,17 +63,13 @@ specification.
 | `NUMBER_OF_CUSTODY_GROUPS` | `128` | Number of custody groups available for nodes to custody                           |
 | `CUSTODY_REQUIREMENT`      | `4`   | Minimum number of custody groups an honest node custodies and serves samples from |
 
-### Blob schedule
+## Preset
 
-*[New in EIP7892]* This schedule defines the maximum blobs per block limit for a
-given epoch.
+### Size parameters
 
-<!-- list-of-records:blob_schedule -->
-
-| Epoch                       | Max Blobs Per Block | Description                      |
-| --------------------------- | ------------------- | -------------------------------- |
-| `Epoch(269568)` **Deneb**   | `uint64(6)`         | The limit is set to `6` blobs    |
-| `Epoch(364032)` **Electra** | `uint64(9)`         | The limit is raised to `9` blobs |
+| Name                | Value                                | Description                                   |
+| ------------------- | ------------------------------------ | --------------------------------------------- |
+| `NUMBER_OF_COLUMNS` | `uint64(CELLS_PER_EXT_BLOB)` (= 128) | Number of columns in the extended data matrix |
 
 ### Containers
 
@@ -88,7 +77,7 @@ given epoch.
 
 ```python
 class DataColumnSidecar(Container):
-    index: ColumnIndex  # Index of column in extended matrix
+    index: ColumnIndex
     column: List[Cell, MAX_BLOB_COMMITMENTS_PER_BLOCK]
     kzg_commitments: List[KZGCommitment, MAX_BLOB_COMMITMENTS_PER_BLOCK]
     kzg_proofs: List[KZGProof, MAX_BLOB_COMMITMENTS_PER_BLOCK]
@@ -114,12 +103,15 @@ class MatrixEntry(Container):
 def get_custody_groups(node_id: NodeID, custody_group_count: uint64) -> Sequence[CustodyIndex]:
     assert custody_group_count <= NUMBER_OF_CUSTODY_GROUPS
 
+    # Skip computation if all groups are custodied
+    if custody_group_count == NUMBER_OF_CUSTODY_GROUPS:
+        return [CustodyIndex(i) for i in range(NUMBER_OF_CUSTODY_GROUPS)]
+
     current_id = uint256(node_id)
     custody_groups: List[CustodyIndex] = []
     while len(custody_groups) < custody_group_count:
         custody_group = CustodyIndex(
-            bytes_to_uint64(hash(uint_to_bytes(current_id))[0:8])
-            % NUMBER_OF_CUSTODY_GROUPS
+            bytes_to_uint64(hash(uint_to_bytes(current_id))[0:8]) % NUMBER_OF_CUSTODY_GROUPS
         )
         if custody_group not in custody_groups:
             custody_groups.append(custody_group)
@@ -133,20 +125,6 @@ def get_custody_groups(node_id: NodeID, custody_group_count: uint64) -> Sequence
     return sorted(custody_groups)
 ```
 
-### `get_max_blobs_per_block`
-
-```python
-def get_max_blobs_per_block(epoch: Epoch) -> uint64:
-    """
-    Return the maximum number of blobs that can be included in a block for a given epoch.
-    """
-    assert len(BLOB_SCHEDULE) > 0
-    for entry in sorted(BLOB_SCHEDULE, key=lambda e: e["EPOCH"], reverse=True):
-        if epoch >= entry["EPOCH"]:
-            return entry["MAX_BLOBS_PER_BLOCK"]
-    return min(entry["MAX_BLOBS_PER_BLOCK"] for entry in BLOB_SCHEDULE)
-```
-
 ### `compute_columns_for_custody_group`
 
 ```python
@@ -154,8 +132,7 @@ def compute_columns_for_custody_group(custody_group: CustodyIndex) -> Sequence[C
     assert custody_group < NUMBER_OF_CUSTODY_GROUPS
     columns_per_group = NUMBER_OF_COLUMNS // NUMBER_OF_CUSTODY_GROUPS
     return [
-        ColumnIndex(NUMBER_OF_CUSTODY_GROUPS * i + custody_group)
-        for i in range(columns_per_group)
+        ColumnIndex(NUMBER_OF_CUSTODY_GROUPS * i + custody_group) for i in range(columns_per_group)
     ]
 ```
 
@@ -173,19 +150,23 @@ def compute_matrix(blobs: Sequence[Blob]) -> Sequence[MatrixEntry]:
     for blob_index, blob in enumerate(blobs):
         cells, proofs = compute_cells_and_kzg_proofs(blob)
         for cell_index, (cell, proof) in enumerate(zip(cells, proofs)):
-            matrix.append(MatrixEntry(
-                cell=cell,
-                kzg_proof=proof,
-                row_index=blob_index,
-                column_index=cell_index,
-            ))
+            matrix.append(
+                MatrixEntry(
+                    cell=cell,
+                    kzg_proof=proof,
+                    row_index=blob_index,
+                    column_index=cell_index,
+                )
+            )
     return matrix
 ```
 
 ### `recover_matrix`
 
 ```python
-def recover_matrix(partial_matrix: Sequence[MatrixEntry], blob_count: uint64) -> Sequence[MatrixEntry]:
+def recover_matrix(
+    partial_matrix: Sequence[MatrixEntry], blob_count: uint64
+) -> Sequence[MatrixEntry]:
     """
     Recover the full, flattened sequence of matrix entries.
 
@@ -198,12 +179,14 @@ def recover_matrix(partial_matrix: Sequence[MatrixEntry], blob_count: uint64) ->
         cells = [e.cell for e in partial_matrix if e.row_index == blob_index]
         recovered_cells, recovered_proofs = recover_cells_and_kzg_proofs(cell_indices, cells)
         for cell_index, (cell, proof) in enumerate(zip(recovered_cells, recovered_proofs)):
-            matrix.append(MatrixEntry(
-                cell=cell,
-                kzg_proof=proof,
-                row_index=blob_index,
-                column_index=cell_index,
-            ))
+            matrix.append(
+                MatrixEntry(
+                    cell=cell,
+                    kzg_proof=proof,
+                    row_index=blob_index,
+                    column_index=cell_index,
+                )
+            )
     return matrix
 ```
 
@@ -269,17 +252,20 @@ columns from other peers.
 ## Reconstruction and cross-seeding
 
 If the node obtains 50%+ of all the columns, it SHOULD reconstruct the full data
-matrix via `recover_matrix` helper. Nodes MAY delay this reconstruction allowing
-time for other columns to arrive over the network. If delaying reconstruction,
-nodes may use a random delay in order to desynchronize reconstruction among
-nodes, thus reducing overall CPU load.
+matrix via the `recover_matrix` helper. Nodes MAY delay this reconstruction
+allowing time for other columns to arrive over the network. If delaying
+reconstruction, nodes may use a random delay in order to desynchronize
+reconstruction among nodes, thus reducing overall CPU load.
 
 Once the node obtains a column through reconstruction, the node MUST expose the
 new column as if it had received it over the network. If the node is subscribed
 to the subnet corresponding to the column, it MUST send the reconstructed
-DataColumnSidecar to its topic mesh neighbors. If instead the node is not
+`DataColumnSidecar` to its topic mesh neighbors. If instead the node is not
 subscribed to the corresponding subnet, it SHOULD still expose the availability
-of the DataColumnSidecar as part of the gossip emission process.
+of the `DataColumnSidecar` as part of the gossip emission process. After
+exposing the reconstructed `DataColumnSidecar` to the network, the node MAY
+delete the `DataColumnSidecar` if it is not part of the node's custody
+requirement.
 
 *Note*: A node always maintains a matrix view of the rows and columns they are
 following, able to cross-reference and cross-seed in either direction.
