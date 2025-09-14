@@ -37,6 +37,7 @@ NORM = $(shell tput sgr0)
 # Print target descriptions.
 help:
 	@echo "make $(BOLD)clean$(NORM)      -- delete all untracked files"
+	@echo "make $(BOLD)comptests$(NORM)  -- generate compliance tests"
 	@echo "make $(BOLD)coverage$(NORM)   -- run pyspec tests with coverage"
 	@echo "make $(BOLD)kzg_setups$(NORM) -- generate trusted setups"
 	@echo "make $(BOLD)lint$(NORM)       -- run the linters"
@@ -112,6 +113,7 @@ test: pyspec
 		$(PRESET) \
 		$(BLS) \
 		--junitxml=$(TEST_REPORT_DIR)/test_results.xml \
+		$(CURDIR)/tests/infra \
 		$(PYSPEC_DIR)/eth2spec
 
 ###############################################################################
@@ -175,20 +177,14 @@ PYLINT_CONFIG = $(CURDIR)/pylint.ini
 
 PYLINT_SCOPE := $(foreach S,$(ALL_EXECUTABLE_SPEC_NAMES), $(PYSPEC_DIR)/eth2spec/$S)
 MYPY_SCOPE := $(foreach S,$(ALL_EXECUTABLE_SPEC_NAMES), -p eth2spec.$S)
-MARKDOWN_FILES = $(CURDIR)/README.md \
-                 $(wildcard $(SPEC_DIR)/*/*.md) \
-                 $(wildcard $(SPEC_DIR)/*/*/*.md) \
-                 $(wildcard $(SPEC_DIR)/_features/*/*.md) \
-                 $(wildcard $(SPEC_DIR)/_features/*/*/*.md) \
-                 $(wildcard $(SSZ_DIR)/*.md)
+MARKDOWN_FILES := $(shell find $(CURDIR) -name '*.md')
 
 # Check for mistakes.
 lint: pyspec
 	@$(MDFORMAT_VENV) --number --wrap=80 $(MARKDOWN_FILES)
 	@$(CODESPELL_VENV) . --skip "./.git,$(VENV),$(PYSPEC_DIR)/.mypy_cache" -I .codespell-whitelist
-	@$(PYTHON_VENV) -m isort --quiet $(CURDIR)/tests
-	@$(PYTHON_VENV) -m black --quiet $(CURDIR)/tests
-	@$(PYTHON_VENV) -m pylint --rcfile $(PYLINT_CONFIG) $(PYLINT_SCOPE)
+	@$(PYTHON_VENV) -m ruff check --fix --quiet $(CURDIR)/tests $(CURDIR)/pysetup $(CURDIR)/setup.py
+	@$(PYTHON_VENV) -m ruff format --quiet $(CURDIR)/tests $(CURDIR)/pysetup $(CURDIR)/setup.py
 	@$(PYTHON_VENV) -m mypy --config-file $(MYPY_CONFIG) $(MYPY_SCOPE)
 
 ###############################################################################
@@ -241,6 +237,27 @@ kzg_setups: pyspec
 			--g2-length=65 \
 			--output-dir $(CURDIR)/presets/$$preset/trusted_setups; \
 	done
+
+COMP_TEST_VECTOR_DIR = $(CURDIR)/../compliance-spec-tests/tests
+
+# Generate compliance tests (fork choice).
+# This will forcibly rebuild pyspec just in case.
+# To generate compliance tests with a particular configuration, append fc_gen_config=<config>,
+# where <config> can be either tiny, small or standard, eg:
+#   make comptests fc_gen_config=standard
+# One can specify threads=N, fork=<fork> or preset=<preset> as with reftests, eg:
+#   make comptests fc_gen_config=standard fork=deneb preset=mainnet threads=8
+comptests: FC_GEN_CONFIG := $(if $(fc_gen_config),$(fc_gen_config),tiny)
+comptests: MAYBE_THREADS := $(if $(threads),--threads=$(threads),--fc-gen-multi-processing)
+comptests: MAYBE_FORKS := $(if $(fork),--forks $(subst ${COMMA}, ,$(fork)))
+comptests: MAYBE_PRESETS := $(if $(preset),--presets $(subst ${COMMA}, ,$(preset)))
+comptests: pyspec
+	@$(PYTHON_VENV) -m tests.generators.compliance_runners.fork_choice.test_gen \
+		--output $(COMP_TEST_VECTOR_DIR) \
+		--fc-gen-config $(FC_GEN_CONFIG) \
+		$(MAYBE_THREADS) \
+		$(MAYBE_FORKS) \
+		$(MAYBE_PRESETS)
 
 ###############################################################################
 # Cleaning
