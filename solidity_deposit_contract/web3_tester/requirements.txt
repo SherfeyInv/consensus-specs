@@ -4,3 +4,4 @@ pytest>=4.4
 # The eth2spec
 ../../
 requests>=2.32.4 # not directly required, pinned by Snyk to avoid a vulnerability
+protobuf>=4.25.8 # not directly required, pinned by Snyk to avoid a vulnerability
